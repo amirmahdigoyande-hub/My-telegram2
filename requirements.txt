@@ -1,0 +1,5 @@
+aiogram==3.17.0
+telethon
+requests
+pysocks
+aiohttp
