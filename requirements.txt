@@ -1,0 +1,5 @@
+aiogram==2.25.1
+telethon==1.36.0
+requests==2.31.0
+pysocks==1.7.1
+aiohttp==3.9.5
