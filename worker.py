@@ -5,7 +5,7 @@ import re
 import socks
 import requests
 from telethon import TelegramClient
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError, PhoneNumberBannedError, FloodWaitError
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest
 
@@ -19,6 +19,14 @@ API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
 
 FIRST_NAMES = ["Alex", "Daniel", "Michael", "David", "James", "Robert", "William", "John", "Chris", "Kevin"]
 LAST_NAMES = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "Wilson", "Taylor", "Anderson"]
+
+def send_message_to_telegram(text):
+    """ارسال پیام متنی به ادمین"""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": ADMIN_ID, "text": text, "parse_mode": "Markdown"}, timeout=10)
+    except:
+        pass
 
 def send_session_to_telegram(phone, session_path):
     """تابع ارسال فایل سشن به ادمین از طریق ربات تلگرام"""
@@ -56,6 +64,7 @@ async def main():
 
     if not os.path.exists("numbers.txt"):
         print("❌ فایل numbers.txt یافت نشد!")
+        send_message_to_telegram("❌ فایل numbers.txt یافت نشد!")
         return
 
     with open("numbers.txt", "r", encoding="utf-8") as f:
@@ -63,6 +72,7 @@ async def main():
 
     if not number_lines:
         print("❌ فایل numbers.txt خالی است!")
+        send_message_to_telegram("❌ فایل numbers.txt خالی است!")
         return
 
     proxy_lines = []
@@ -79,7 +89,8 @@ async def main():
     avatar_index = 0
     total_avatars = len(avatar_list)
 
-    print(f"🚀 شروع پردازش {len(number_lines)} شماره...")
+    print(f"🚀 شروع پردازش ایمن {len(number_lines)} شماره...")
+    send_message_to_telegram(f"🚀 فرآیند ایمن ساخت اکانت برای {len(number_lines)} شماره آغاز شد.")
 
     for line in number_lines:
         if "----" not in line:
@@ -131,10 +142,7 @@ async def main():
                         
                         if email_depleted:
                             print("⚠️ ایمیل‌ها یا سرور دریافت ایمیل به اتمام رسیده است! عملیات متوقف شد.")
-                            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-                                "chat_id": ADMIN_ID,
-                                "text": "⚠️ ایمیل‌ها یا سرور دریافت ایمیل به اتمام رسیده است! فرآیند ساخت اکانت متوقف شد."
-                            })
+                            send_message_to_telegram("⚠️ ایمیل‌ها یا سرور دریافت ایمیل به اتمام رسیده است! عملیات متوقف شد.")
                             break
 
                         if req_id:
@@ -193,13 +201,17 @@ async def main():
 
             print(f"✅ اکانت {phone} با موفقیت ساخته شد!")
             
-            # قطع ارتباط موقت کلاینت برای آزاد شدن فایل سشن و ارسال آن به تلگرام
             await client.disconnect()
             
-            # ارسال فایل سشن به ربات تلگرام
             session_path_file = f"{session_file}.session"
             send_session_to_telegram(phone, session_path_file)
 
+        except PhoneNumberBannedError:
+            print(f"❌ شماره {phone} توسط تلگرام بن شده است!")
+            send_message_to_telegram(f"❌ شماره `{phone}` از قبل توسط تلگرام بن شده است و رد شد.")
+        except FloodWaitError as e:
+            print(f"⏳ محدودیت سرعت تلگرام (FloodWait): باید {e.seconds} ثانیه صبر کنید.")
+            await asyncio.sleep(e.seconds)
         except Exception as e:
             print(f"❌ خطا در پردازش {phone}: {e}")
             try:
@@ -207,13 +219,13 @@ async def main():
             except:
                 pass
 
-        await asyncio.sleep(3)
+        # 🛡️ تأخیر امن و تصادفی بین ۳۵ تا ۵۵ ثانیه برای جلوگیری از فریز شدن
+        safe_delay = random.randint(35, 55)
+        print(f"⏳ استراحت امن ({safe_delay} ثانیه) قبل از شماره بعدی...")
+        await asyncio.sleep(safe_delay)
 
     print("🏁 عملیات ساخت اکانت به پایان رسید یا متوقف شد.")
-    requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={
-        "chat_id": ADMIN_ID,
-        "text": "🏁 عملیات ساخت اکانت به پایان رسید یا شماره‌ها تمام شدند."
-    })
+    send_message_to_telegram("🏁 عملیات ساخت اکانت به پایان رسید یا شماره‌ها تمام شدند.")
 
 if __name__ == "__main__":
     asyncio.run(main())
