@@ -253,15 +253,32 @@ async def start_creation_process(message: types.Message):
 
 async def run_account_creation_loop(message: types.Message):
     try:
+        if not os.path.exists("numbers.txt"):
+            await bot.send_message(ADMIN_ID, "❌ فایل شماره‌ها (`numbers.txt`) یافت نشد!")
+            return
+
         with open("numbers.txt", "r", encoding="utf-8") as f:
             number_lines = [l.strip() for l in f if l.strip()]
-        with open("proxies.txt", "r", encoding="utf-8") as f:
-            proxy_lines = [l.strip() for l in f if l.strip()]
+        
+        if not number_lines:
+            await bot.send_message(ADMIN_ID, "❌ فایل شماره‌ها خالی است. شماره‌ای برای پردازش وجود ندارد!")
+            return
+
+        proxy_lines = []
+        if os.path.exists("proxies.txt"):
+            with open("proxies.txt", "r", encoding="utf-8") as f:
+                proxy_lines = [l.strip() for l in f if l.strip()]
 
         proxy_index = 0
         total_proxies = len(proxy_lines)
 
-        for line in number_lines:
+        avatar_list = []
+        if os.path.exists("avatars"):
+            avatar_list = [os.path.join("avatars", img) for img in os.listdir("avatars") if img.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        avatar_index = 0
+        total_avatars = len(avatar_list)
+
+        for line_idx, line in enumerate(number_lines):
             if not bot_process_status["is_running"]:
                 break
             if "----" not in line: continue
@@ -270,8 +287,11 @@ async def run_account_creation_loop(message: types.Message):
             if not phone.startswith("+"): phone = "+" + phone
             api_url = api_url.strip()
 
-            proxy_config = parse_proxy_link(proxy_lines[proxy_index % total_proxies]) if total_proxies > 0 else None
-            if total_proxies > 0: proxy_index += 1
+            # استفاده ترتیبی و چرخشی از پروکسی‌ها
+            proxy_config = None
+            if total_proxies > 0:
+                proxy_config = parse_proxy_link(proxy_lines[proxy_index % total_proxies])
+                proxy_index += 1
 
             await bot.send_message(ADMIN_ID, f"⏳ در حال پردازش شماره: `{phone}`", parse_mode="Markdown")
             session_file = f"sessions/{phone.replace('+', '')}"
@@ -283,6 +303,8 @@ async def run_account_creation_loop(message: types.Message):
                     await client.send_code_request(phone)
                     
                     code = None
+                    email_depleted = False
+
                     if "venusads.ir" in api_url:
                         key_match = re.search(r"key=([^&]+)", api_url)
                         if key_match:
@@ -294,12 +316,20 @@ async def run_account_creation_loop(message: types.Message):
                                 if not bot_process_status["is_running"]: break
                                 await asyncio.sleep(5)
                                 try:
-                                    r = requests.get(get_email_url, timeout=10).json()
-                                    if "id" in r:
-                                        req_id = r["id"]
+                                    resp_data = requests.get(get_email_url, timeout=10).json()
+                                    if "id" in resp_data:
+                                        req_id = resp_data["id"]
+                                        break
+                                    elif "error" in str(resp_data).lower() or "limit" in str(resp_data).lower() or "empty" in str(resp_data).lower():
+                                        email_depleted = True
                                         break
                                 except: pass
                             
+                            if email_depleted:
+                                await bot.send_message(ADMIN_ID, "⚠️ ایمیل‌ها یا سرور دریافت ایمیل به اتمام رسیده است! عملیات متوقف شد.", parse_mode="Markdown")
+                                await client.disconnect()
+                                break
+
                             if req_id:
                                 get_code_url = f"https://venusads.ir/api/V1/email/getCode/?key={api_key}&id={req_id}"
                                 for _ in range(8):
@@ -343,13 +373,14 @@ async def run_account_creation_loop(message: types.Message):
                     try: await client.edit_2fa(new_password=user_config["password_2fa"])
                     except: pass
 
-                if user_config["use_avatar"] and os.path.exists("avatars"):
-                    avatars = os.listdir("avatars")
-                    if avatars:
-                        try:
-                            file = await client.upload_file(os.path.join("avatars", random.choice(avatars)))
-                            await client(UploadProfilePhotoRequest(file=file))
-                        except: pass
+                # استفاده ترتیبی و چرخشی از عکس‌های آواتار
+                if user_config["use_avatar"] and total_avatars > 0:
+                    try:
+                        chosen_avatar = avatar_list[avatar_index % total_avatars]
+                        avatar_index += 1
+                        file = await client.upload_file(chosen_avatar)
+                        await client(UploadProfilePhotoRequest(file=file))
+                    except: pass
 
                 if user_config["use_username"]:
                     try: await client(UpdateUsernameRequest(username=f"user_{random.randint(1000000, 9999999)}"))
@@ -370,6 +401,10 @@ async def run_account_creation_loop(message: types.Message):
             finally:
                 try: await client.disconnect()
                 except: pass
+
+            # حذف شماره پردازش شده از فایل یا بررسی پایان شماره‌ها
+            if line_idx == len(number_lines) - 1:
+                await bot.send_message(ADMIN_ID, "⚠️ تمامی شماره‌های داخل فایل به پایان رسیدند!", parse_mode="Markdown")
 
             await asyncio.sleep(3)
 
@@ -398,7 +433,6 @@ async def receive_numbers(message: types.Message, state: FSMContext):
     file = await bot.get_file(message.document.file_id)
     await bot.download_file(file.file_path, "numbers.txt")
     
-    # شمارش تعداد شماره‌های ذخیره شده در فایل
     count = 0
     try:
         with open("numbers.txt", "r", encoding="utf-8") as f:
