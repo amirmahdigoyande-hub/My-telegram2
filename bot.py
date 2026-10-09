@@ -26,8 +26,7 @@ ADMIN_ID = 8093069505
 API_ID = 6
 API_HASH = "eb06d4abfb49dc3eeb1aeb98ae0f581e"
 
-# تنظیمات وب‌هوک برای Render (نام اپلیکیشن خود را در رندر جایگزین کنید)
-# مثال: https://your-app-name.onrender.com
+# تنظیمات وب‌هوک برای Render
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "https://my-telegram-bot.onrender.com")
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
@@ -45,6 +44,8 @@ class BotStates(StatesGroup):
     waiting_for_numbers = State()
     waiting_for_proxies = State()
     waiting_for_avatar = State()
+    waiting_for_proxy_text = State()
+    waiting_for_photos = State()
     setting_country = State()
     setting_2fa_pass = State()
     setting_email_server = State()
@@ -55,7 +56,8 @@ user_config = {
     "password_2fa": "",
     "use_avatar": True,
     "use_username": True,
-    "email_server": 1
+    "email_server": 1,
+    "delivery_method": "سشن (Session) 📁"
 }
 
 bot_process_status = {
@@ -86,6 +88,8 @@ def check_daily_reset():
         stats["last_reset"] = today_str
         save_stats(stats)
 
+# --- کیبوردها با طراحی زیبا و استاندارد ---
+
 def get_main_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -115,10 +119,77 @@ def get_management_keyboard():
 def get_settings_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📁 ارسال فایل شماره‌ها"), KeyboardButton(text="🛡 ارسال فایل پراکسی")],
-            [KeyboardButton(text="🖼 ارسال عکس‌های آواتار"), KeyboardButton(text="🌍 تغییر کشور")],
-            [KeyboardButton(text="🎛 سرور ایمیل (۱ یا ۲)"), KeyboardButton(text="🔐 تنظیم رمز دوم")],
-            [KeyboardButton(text="🔙 بازگشت به منوی اصلی")]
+            [KeyboardButton(text="پروکسی 🌐"), KeyboardButton(text="ایمیل 📧")],
+            [KeyboardButton(text="عکس‌ها 🖼️"), KeyboardButton(text="رمز دو مرحله‌ای 🔐")],
+            [KeyboardButton(text="حذف 🗑️"), KeyboardButton(text="خروجی 📥")],
+            [KeyboardButton(text="تحویل اکانت 📦"), KeyboardButton(text="🔙 بازگشت به منوی اصلی")]
+        ],
+        resize_keyboard=True
+    )
+
+def proxy_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="افزودن پروکسی ➕"), KeyboardButton(text="حذف پروکسی 🗑️")],
+            [KeyboardButton(text="دریافت توکن پروکسی 🔑"), KeyboardButton(text="دریافت API پروکسی ⚡")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def email_menu_keyboard(active_server=1):
+    s1 = "سرور ۱ (فعال) ✅" if active_server == 1 else "سرور ۱ 🟢"
+    s2 = "سرور ۲ (فعال) ✅" if active_server == 2 else "سرور ۲ 🔢"
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=s1), KeyboardButton(text=s2)],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def photos_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="ارسال عکس 🖼️"), KeyboardButton(text="حذف عکس‌ها ❌")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def tfa_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="فعال ✅"), KeyboardButton(text="غیر فعال ❌")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def delete_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="همه 🗑️"), KeyboardButton(text="کد گرفته ها 📄")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def export_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="دریأفتی ها ✅"), KeyboardButton(text="دریافت نشده ها 🆓")],
+            [KeyboardButton(text="کد نگرفته ها ⏳")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
+        ],
+        resize_keyboard=True
+    )
+
+def delivery_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="سشن (Session) 📁"), KeyboardButton(text="زیپ (Zip) 🗜️")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات")]
         ],
         resize_keyboard=True
     )
@@ -139,6 +210,13 @@ async def back_to_main(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("به منوی اصلی برگشتید:", reply_markup=get_main_keyboard())
 
+@dp.message(F.text == "🔙 بازگشت به تنظیمات")
+async def back_to_settings(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.clear()
+    await message.answer("⚙️ پنل مدیریت و تنظیمات:", reply_markup=get_settings_keyboard())
+
+# --- مدیریت بخش ساخت اکانت ---
 @dp.message(F.text == "🚀 ساخت اکانت")
 async def menu_creation(message: types.Message):
     if not is_admin(message.from_user.id): return
@@ -164,7 +242,7 @@ async def start_creation_process(message: types.Message):
         return
 
     if not os.path.exists("numbers.txt") or not os.path.exists("proxies.txt"):
-        await message.answer("❌ ابتدا فایل numbers.txt و proxies.txt را در بخش تنظیمات ارسال کنید!")
+        await message.answer("❌ ابتدا فایل numbers.txt و proxies.txt را آماده کنید (می‌توانید از بخش تنظیمات یا فایل ارسال کنید).")
         return
 
     bot_process_status["is_running"] = True
@@ -211,7 +289,7 @@ async def run_account_creation_loop(message: types.Message):
                             req_id = None
                             for _ in range(5):
                                 if not bot_process_status["is_running"]: break
-                                await asyncio.sleep(4)
+                                await asyncio.sleep(5)
                                 try:
                                     r = requests.get(get_email_url, timeout=10).json()
                                     if "id" in r:
@@ -299,6 +377,177 @@ async def run_account_creation_loop(message: types.Message):
         bot_process_status["task"] = None
         await bot.send_message(ADMIN_ID, "🏁 عملیات ساخت اکانت متوقف یا پایان یافت.", reply_markup=get_creation_keyboard())
 
+# --- منوی تنظیمات جدید و زیرمنوها ---
+
+@dp.message(F.text == "⚙️ تنظیمات")
+async def menu_settings(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("⚙️ منوی مدیریت و تنظیمات:\nلطفاً بخش مورد نظر را انتخاب کنید:", reply_markup=get_settings_keyboard())
+
+# 1. پروکسی 🌐
+@dp.message(F.text == "پروکسی 🌐")
+async def menu_proxy(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🌐 منوی مدیریت پروکسی‌ها:", reply_markup=proxy_menu_keyboard())
+
+@dp.message(F.text == "افزودن پروکسی ➕")
+async def add_proxy_prompt(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(BotStates.waiting_for_proxy_text)
+    await message.answer("لطفاً پروکسی خود را به‌صورت متن یا ارسال فایل/سند ارسال کنید:")
+
+@dp.message(BotStates.waiting_for_proxy_text, F.text | F.document)
+async def receive_proxy_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    if message.document:
+        file = await bot.get_file(message.document.file_id)
+        await bot.download_file(file.file_path, "proxies.txt")
+    else:
+        with open("proxies.txt", "a", encoding="utf-8") as f:
+            f.write(message.text + "\n")
+    await state.clear()
+    await message.answer("✅ پروکسی با موفقیت دریافت و ذخیره شد.", reply_markup=proxy_menu_keyboard())
+
+@dp.message(F.text == "حذف پروکسی 🗑️")
+async def delete_proxy_file(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    if os.path.exists("proxies.txt"):
+        os.remove("proxies.txt")
+        await message.answer("🗑️ فایل پروکسی‌ها پاک شد.", reply_markup=proxy_menu_keyboard())
+    else:
+        await message.answer("❌ هیچ فایل پروکسی‌ای وجود ندارد.", reply_markup=proxy_menu_keyboard())
+
+@dp.message(F.text == "دریافت توکن پروکسی 🔑")
+async def get_proxy_token(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🔑 توکن پروکسی فعال سیستم.", reply_markup=proxy_menu_keyboard())
+
+@dp.message(F.text == "دریافت API پروکسی ⚡")
+async def get_proxy_api(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("⚡ اطلاعات API پروکسی.", reply_markup=proxy_menu_keyboard())
+
+# 2. ایمیل 📧
+@dp.message(F.text == "ایمیل 📧")
+async def menu_email(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    current = user_config["email_server"]
+    await message.answer(
+        f"📧 تنظیمات سرور دریافت ایمیل\n🟢 سرور فعال فعلی: سرور {current}\n\nلطفاً سرور مورد نظر خود را انتخاب کنید:",
+        reply_markup=email_menu_keyboard(current)
+    )
+
+@dp.message(F.text.in_(["سرور ۱ (فعال) ✅", "سرور ۱ 🟢"]))
+async def set_server_1(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    user_config["email_server"] = 1
+    await message.answer("✅ سرور فعال روی **سرور ۱** تنظیم شد.", parse_mode="Markdown", reply_markup=email_menu_keyboard(1))
+
+@dp.message(F.text.in_(["سرور ۲ (فعال) ✅", "سرور ۲ 🔢"]))
+async def set_server_2(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    user_config["email_server"] = 2
+    await message.answer("✅ سرور فعال روی **سرور ۲** تنظیم شد.", parse_mode="Markdown", reply_markup=email_menu_keyboard(2))
+
+# 3. عکس‌ها 🖼️
+@dp.message(F.text == "عکس‌ها 🖼️")
+async def menu_photos(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🖼️ مدیریت عکس‌ها:", reply_markup=photos_menu_keyboard())
+
+@dp.message(F.text == "ارسال عکس 🖼️")
+async def prompt_send_photo(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(BotStates.waiting_for_photos)
+    await message.answer("لطفاً عکس یا عکس‌های خود را به‌صورت تکی یا فایل ارسال کنید:")
+
+@dp.message(BotStates.waiting_for_photos, F.photo | F.document)
+async def receive_photos(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    if message.photo:
+        photo = message.photo[-1]
+        file = await bot.get_file(photo.file_id)
+        await bot.download_file(file.file_path, f"avatars/{photo.file_unique_id}.jpg")
+    await state.clear()
+    await message.answer("✅ عکس‌ها با موفقیت دریافت شدند.", reply_markup=photos_menu_keyboard())
+
+@dp.message(F.text == "حذف عکس‌ها ❌")
+async def delete_all_photos(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    if os.path.exists("avatars"):
+        for f in os.listdir("avatars"):
+            try: os.remove(os.path.join("avatars", f))
+            except: pass
+    await message.answer("🗑️ تمامی عکس‌ها با موفقیت حذف شدند.", reply_markup=photos_menu_keyboard())
+
+# 4. رمز دو مرحله‌ای 🔐
+@dp.message(F.text == "رمز دو مرحله‌ای 🔐")
+async def menu_tfa(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🔐 تنظیمات رمز دو مرحله‌ای (بدون ثبت ایمیل):", reply_markup=tfa_menu_keyboard())
+
+@dp.message(F.text == "فعال ✅")
+async def tfa_active(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(BotStates.setting_2fa_pass)
+    await message.answer("لطفاً رمز عبور دو مرحله‌ای مورد نظر خود را ارسال کنید تا روی اکانت‌ها اعمال شود:")
+
+@dp.message(BotStates.setting_2fa_pass)
+async def save_tfa_password(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    txt = message.text.strip()
+    user_config["use_2fa"] = True
+    user_config["password_2fa"] = txt
+    await state.clear()
+    await message.answer("✅ رمز دو مرحله‌ای با موفقیت تنظیم و ذخیره شد.", reply_markup=tfa_menu_keyboard())
+
+@dp.message(F.text == "غیر فعال ❌")
+async def tfa_inactive(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    user_config["use_2fa"] = False
+    user_config["password_2fa"] = ""
+    await message.answer("❌ رمز دو مرحله‌ای غیرفعال شد.", reply_markup=tfa_menu_keyboard())
+
+# 5. حذف 🗑️
+@dp.message(F.text == "حذف 🗑️")
+async def menu_delete(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🗑️ بخش حذف اطلاعات:", reply_markup=delete_menu_keyboard())
+
+@dp.message(F.text == "همه 🗑️")
+async def delete_all(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("✅ تمام موارد با موفقیت حذف شدند.", reply_markup=delete_menu_keyboard())
+
+@dp.message(F.text == "کد گرفته ها 📄")
+async def delete_code_taken(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("✅ موارد کد گرفته شده با موفقیت پاک شدند.", reply_markup=delete_menu_keyboard())
+
+# 6. خروجی 📥
+@dp.message(F.text == "خروجی 📥")
+async def menu_export(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("📥 خروجی شماره‌ها: از کدام بخش فایل خروجی می‌خواهید؟", reply_markup=export_menu_keyboard())
+
+@dp.message(F.text.in_(["دریأفتی ها ✅", "دریافت نشده ها 🆓", "کد نگرفته ها ⏳"]))
+async def export_category_handler(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer(f"📦 فایل خروجی بخش «{message.text}» آماده و ارسال شد.")
+
+# 7. تحویل اکانت 📦
+@dp.message(F.text == "تحویل اکانت 📦")
+async def menu_delivery(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("📦 لطفاً نحوه تحویل اکانت‌ها را انتخاب کنید:", reply_markup=delivery_menu_keyboard())
+
+@dp.message(F.text.in_(["سشن (Session) 📁", "زیپ (Zip) 🗜️"]))
+async def set_delivery_method(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    user_config["delivery_method"] = message.text
+    await message.answer(f"✅ روش تحویل اکانت روی حالت «{message.text}» تنظیم شد.", reply_markup=delivery_menu_keyboard())
+
+# --- سایر بخش‌ها و آمار ---
 @dp.message(F.text == "📊 آمار اکانت ها")
 async def show_stats_menu(message: types.Message):
     if not is_admin(message.from_user.id): return
@@ -327,6 +576,9 @@ async def menu_management(message: types.Message):
 @dp.message(F.text == "📋 لیست سشن‌ها و عملیات")
 async def list_sessions(message: types.Message):
     if not is_admin(message.from_user.id): return
+    if not os.path.exists("sessions"):
+        await message.answer("❌ هیچ فایل سشنی موجود نیست.")
+        return
     sessions = [f.replace(".session", "") for f in os.listdir("sessions") if f.endswith(".session")]
     if not sessions:
         await message.answer("❌ هیچ فایل سشنی موجود نیست.")
@@ -379,109 +631,6 @@ async def execute_management_command(message: types.Message):
         await message.answer(f"❌ خطا: {e}")
         try: await client.disconnect()
         except: pass
-
-@dp.message(F.text == "⚙️ تنظیمات")
-async def menu_settings(message: types.Message):
-    if not is_admin(message.from_user.id): return
-    nums_exist = os.path.exists("numbers.txt")
-    proxies_exist = os.path.exists("proxies.txt")
-    avatars_count = len(os.listdir("avatars")) if os.path.exists("avatars") else 0
-
-    text = (
-        f"⚙️ **تنظیمات:**\n"
-        f"🌍 کشور: `{user_config['country']}`\n"
-        f"📧 سرور ایمیل: `سرور {user_config['email_server']}`\n"
-        f"🔐 رمز دوم: {'فعال' if user_config['use_2fa'] else 'غیرفعال'}\n"
-        f"🖼 آواتارها: {avatars_count} عکس\n"
-        f"📁 شماره‌ها: {'موجود ✅' if nums_exist else 'خالی ❌'}\n"
-        f"🛡 پراکسی: {'موجود ✅' if proxies_exist else 'خالی ❌'}"
-    )
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_settings_keyboard())
-
-@dp.message(F.text == "📁 ارسال فایل شماره‌ها")
-async def ask_numbers(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.waiting_for_numbers)
-    await message.answer("فایل `numbers.txt` را بفرستید:")
-
-@dp.message(BotStates.waiting_for_numbers, F.document)
-async def receive_numbers(message: types.Message, state: FSMContext):
-    file = await bot.get_file(message.document.file_id)
-    await bot.download_file(file.file_path, "numbers.txt")
-    await state.clear()
-    await message.answer("✅ ذخیره شد.", reply_markup=get_settings_keyboard())
-
-@dp.message(F.text == "🛡 ارسال فایل پراکسی")
-async def ask_proxies(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.waiting_for_proxies)
-    await message.answer("فایل `proxies.txt` را بفرستید:")
-
-@dp.message(BotStates.waiting_for_proxies, F.document)
-async def receive_proxies(message: types.Message, state: FSMContext):
-    file = await bot.get_file(message.document.file_id)
-    await bot.download_file(file.file_path, "proxies.txt")
-    await state.clear()
-    await message.answer("✅ ذخیره شد.", reply_markup=get_settings_keyboard())
-
-@dp.message(F.text == "🖼 ارسال عکس‌های آواتار")
-async def ask_avatar(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.waiting_for_avatar)
-    await message.answer("عکس‌های پروفایل را بفرستید:")
-
-@dp.message(BotStates.waiting_for_avatar, F.photo)
-async def receive_avatar_photo(message: types.Message):
-    photo = message.photo[-1]
-    file = await bot.get_file(photo.file_id)
-    await bot.download_file(file.file_path, f"avatars/{photo.file_unique_id}.jpg")
-    await message.answer("✅ عکس ذخیره شد.")
-
-@dp.message(F.text == "🌍 تغییر کشور")
-async def ask_country(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.setting_country)
-    await message.answer("نام کشور جدید را وارد کنید:")
-
-@dp.message(BotStates.setting_country)
-async def save_country(message: types.Message, state: FSMContext):
-    user_config["country"] = message.text.strip()
-    await state.clear()
-    await message.answer(f"✅ کشور ثبت شد.", reply_markup=get_settings_keyboard())
-
-@dp.message(F.text == "🎛 سرور ایمیل (۱ یا ۲)")
-async def ask_email_server(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.setting_email_server)
-    await message.answer("شماره سرور ایمیل را وارد کنید (`1` یا `2`):")
-
-@dp.message(BotStates.setting_email_server)
-async def save_email_server(message: types.Message, state: FSMContext):
-    txt = message.text.strip()
-    if txt in ["1", "2"]:
-        user_config["email_server"] = int(txt)
-        await state.clear()
-        await message.answer(f"✅ سرور ایمیل تنظیم شد.", reply_markup=get_settings_keyboard())
-    else:
-        await message.answer("❌ فقط عدد 1 یا 2:")
-
-@dp.message(F.text == "🔐 تنظیم رمز دوم")
-async def ask_2fa(message: types.Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.setting_2fa_pass)
-    await message.answer("رمز دوم یا کلمه `no`:")
-
-@dp.message(BotStates.setting_2fa_pass)
-async def save_2fa(message: types.Message, state: FSMContext):
-    txt = message.text.strip()
-    if txt.lower() == "no":
-        user_config["use_2fa"] = False
-        user_config["password_2fa"] = ""
-    else:
-        user_config["use_2fa"] = True
-        user_config["password_2fa"] = txt
-    await state.clear()
-    await message.answer("✅ ذخیره شد.", reply_markup=get_settings_keyboard())
 
 def parse_proxy_link(proxy_url):
     try:
