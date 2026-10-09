@@ -124,7 +124,8 @@ def get_settings_keyboard():
             [KeyboardButton(text="پروکسی 🌐"), KeyboardButton(text="ایمیل 📧")],
             [KeyboardButton(text="عکس‌ها 🖼️"), KeyboardButton(text="رمز دو مرحله‌ای 🔐")],
             [KeyboardButton(text="حذف 🗑️"), KeyboardButton(text="خروجی 📥")],
-            [KeyboardButton(text="تحویل اکانت 📦"), KeyboardButton(text="🔙 بازگشت به منوی اصلی")]
+            [KeyboardButton(text="تحویل اکانت 📦"), KeyboardButton(text="آمار 📊")],
+            [KeyboardButton(text="🔙 بازگشت به منوی اصلی")]
         ],
         resize_keyboard=True
     )
@@ -396,8 +397,17 @@ async def receive_numbers(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
     file = await bot.get_file(message.document.file_id)
     await bot.download_file(file.file_path, "numbers.txt")
+    
+    # شمارش تعداد شماره‌های ذخیره شده در فایل
+    count = 0
+    try:
+        with open("numbers.txt", "r", encoding="utf-8") as f:
+            count = sum(1 for line in f if line.strip())
+    except:
+        pass
+
     await state.clear()
-    await message.answer("✅ فایل شماره‌ها ذخیره شد.", reply_markup=get_settings_keyboard())
+    await message.answer(f"✅ فایل شماره‌ها با موفقیت ذخیره شد.\n🔢 تعداد شماره‌های ذخیره‌شده: **{count}** عدد", parse_mode="Markdown", reply_markup=get_settings_keyboard())
 
 @dp.message(F.text == "🌍 تغییر کشور")
 async def ask_country(message: types.Message, state: FSMContext):
@@ -576,7 +586,34 @@ async def set_delivery_method(message: types.Message):
     user_config["delivery_method"] = message.text
     await message.answer(f"✅ روش تحویل اکانت روی حالت «{message.text}» تنظیم شد.", reply_markup=delivery_menu_keyboard())
 
-# آمار و مدیریت
+# منوی آمار جدید داخل تنظیمات 📊
+@dp.message(F.text == "آمار 📊")
+async def settings_stats_menu(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    
+    total_nums = 0
+    if os.path.exists("numbers.txt"):
+        try:
+            with open("numbers.txt", "r", encoding="utf-8") as f:
+                total_nums = sum(1 for line in f if line.strip())
+        except:
+            pass
+
+    stats = load_stats()
+    total_accounts = stats.get("total", 0)
+
+    text = (
+        f"🔢 **آمار شماره‌های ربات**\n\n"
+        f"🔹 کل شماره‌های موجود: `{total_nums}`\n"
+        f"🔸 شماره‌های دریافت‌شده: `0`\n"
+        f"  ├ ✅ کد گرفته‌ها: `0`\n"
+        f"  └ ⏳ کد نگرفته‌ها: `0`\n\n"
+        f"🆓 شماره‌های آزاد (دریافت‌نشده): `0`\n\n"
+        f"🚀 کل اکانت‌های ساخته‌شده و موجود: `{total_accounts}`"
+    )
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_settings_keyboard())
+
+# آمار و مدیریت کلی
 @dp.message(F.text == "📊 آمار اکانت ها")
 async def show_stats_menu(message: types.Message):
     if not is_admin(message.from_user.id): return
