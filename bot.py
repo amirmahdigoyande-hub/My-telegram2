@@ -19,6 +19,7 @@ from telethon.errors import SessionPasswordNeededError
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest
 from telethon.tl.functions.auth import LogOutRequest
+from telethon.tl.functions.messages import StartBotRequest
 
 BOT_TOKEN = "8774106299:AAEADqQuAc3OKWnjbe0pla73IXNwlLomZqI"
 ADMIN_ID = 8093069505
@@ -50,6 +51,7 @@ class BotStates(StatesGroup):
     setting_2fa_pass = State()
     setting_email_server = State()
     waiting_for_logout_target = State()
+    waiting_for_action_numbers = State()
 
 user_config = {
     "country": "USA",
@@ -58,7 +60,8 @@ user_config = {
     "use_avatar": True,
     "use_username": True,
     "email_server": 1,
-    "delivery_method": "سشن (Session) 📁"
+    "delivery_method": "سشن (Session) 📁",
+    "anti_login": False
 }
 
 bot_process_status = {
@@ -75,7 +78,7 @@ def load_stats():
                 return json.load(f)
         except:
             pass
-    return {"total": 0, "daily": 0, "last_reset": str(datetime.date.today()), "by_country": {}, "accounts_info": {}}
+    return {"total": 0, "daily": 0, "last_reset": str(datetime.date.today()), "by_country": {}, "accounts_info": {}, "passwords": {}}
 
 def save_stats(data):
     with open(STATS_FILE, "w", encoding="utf-8") as f:
@@ -129,14 +132,31 @@ def get_logout_choice_keyboard():
         resize_keyboard=True
     )
 
+def get_target_selection_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="همه 🗑️"), KeyboardButton(text="شماره 📱")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات اکانت")]
+        ],
+        resize_keyboard=True
+    )
+
+def get_anti_login_menu_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="فعال ✅"), KeyboardButton(text="غیر فعال ❌")],
+            [KeyboardButton(text="🔙 بازگشت به تنظیمات اکانت")]
+        ],
+        resize_keyboard=True
+    )
+
 def get_account_settings_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="❌ حذف نشست‌های فعال"), KeyboardButton(text="🛡️ آنتی لاگین")],
+            [KeyboardButton(text="خروج از حساب ها ❌"), KeyboardButton(text="🛡️ آنتی لاگین")],
             [KeyboardButton(text="📝 تنظیم رمز دو مرحله‌ای"), KeyboardButton(text="🔐 رمز دو مرحله‌ای")],
             [KeyboardButton(text="🗑️ حذف رمز دو مرحله‌ای"), KeyboardButton(text="👁️ نمایش رمز دو مرحله‌ای")],
-            [KeyboardButton(text="👤 تغییر نام کاربری"), KeyboardButton(text="🔑 تغییر رمز حساب")],
-            [KeyboardButton(text="❌ بستن پنل")],
+            [KeyboardButton(text="🔎 بررسی حساب ها")],
             [KeyboardButton(text="🔙 بازگشت به مدیریت اکانت ها")]
         ],
         resize_keyboard=True
@@ -249,6 +269,12 @@ async def back_to_management(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
     await state.clear()
     await message.answer("بخش مدیریت سشن‌های ذخیره‌شده:", reply_markup=get_management_keyboard())
+
+@dp.message(F.text == "🔙 بازگشت به تنظیمات اکانت")
+async def back_to_account_settings(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.clear()
+    await account_settings_menu(message)
 
 # --- ساخت اکانت ---
 @dp.message(F.text == "🚀 ساخت اکانت")
@@ -401,7 +427,11 @@ async def run_account_creation_loop(message: types.Message):
                 except: pass
 
                 if user_config["use_2fa"] and user_config["password_2fa"]:
-                    try: await client.edit_2fa(new_password=user_config["password_2fa"])
+                    try:
+                        await client.edit_2fa(new_password=user_config["password_2fa"])
+                        stats = load_stats()
+                        stats.setdefault("passwords", {})[clean_phone] = user_config["password_2fa"]
+                        save_stats(stats)
                     except: pass
 
                 if user_config["use_avatar"] and total_avatars > 0:
@@ -423,7 +453,6 @@ async def run_account_creation_loop(message: types.Message):
                 country = user_config["country"]
                 stats["by_country"][country] = stats["by_country"].get(country, 0) + 1
                 
-                # ثبت اطلاعات برای لیست اکانت‌ها
                 now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 stats["accounts_info"][clean_phone] = {
                     "phone": phone,
@@ -434,7 +463,6 @@ async def run_account_creation_loop(message: types.Message):
 
                 await bot.send_message(ADMIN_ID, f"✅ اکانت `{phone}` با موفقیت ساخته شد!", parse_mode="Markdown")
 
-                # ارسال فایل سشن به ادمین بلافاصله پس از ساخت
                 await client.disconnect()
                 session_path_file = f"{session_file}.session"
                 if os.path.exists(session_path_file):
@@ -512,16 +540,20 @@ async def logout_menu_handler(message: types.Message):
     await message.answer("🚪 منوی خروج از اکانت:\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید:", reply_markup=get_logout_choice_keyboard())
 
 @dp.message(F.text == "همه 🗑️")
-async def logout_all_handler(message: types.Message):
+async def logout_all_handler(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
+    data = await state.get_data()
+    action = data.get("current_action")
+
     if not os.path.exists("sessions"):
-        await message.answer("❌ هیچ سشنی وجود ندارد.", reply_markup=get_management_keyboard())
+        await message.answer("❌ هیچ سشنی وجود ندارد.", reply_markup=get_account_settings_keyboard())
         return
-    
-    count = 0
-    for f in os.listdir("sessions"):
-        if f.endswith(".session"):
-            p = f.replace(".session", "")
+
+    sessions = [f.replace(".session", "") for f in os.listdir("sessions") if f.endswith(".session")]
+
+    if action == "logout_accounts":
+        count = 0
+        for p in sessions:
             client = TelegramClient(f"sessions/{p}", API_ID, API_HASH)
             try:
                 await client.connect()
@@ -529,67 +561,277 @@ async def logout_all_handler(message: types.Message):
                     await client(LogOutRequest())
                 await client.disconnect()
             except: pass
-            try: os.remove(os.path.join("sessions", f))
+            try: os.remove(f"sessions/{p}.session")
             except: pass
             count += 1
+        await message.answer(f"✅ عملیات خروج از تمام ({count}) اکانت انجام شد و سشن‌ها پاک شدند.", reply_markup=get_account_settings_keyboard())
 
-    await message.answer(f"✅ عملیات خروج برای تمام ({count}) اکانت انجام شد و فایل‌های سشن پاک شدند.", reply_markup=get_management_keyboard())
+    elif action == "remove_2fa":
+        count = 0
+        stats = load_stats()
+        for p in sessions:
+            client = TelegramClient(f"sessions/{p}", API_ID, API_HASH)
+            try:
+                await client.connect()
+                if await client.is_user_authorized():
+                    current_p = stats.get("passwords", {}).get(p, "")
+                    await client.edit_2fa(current_password=current_p, new_password=None)
+                    stats.get("passwords", {}).pop(p, None)
+                    count += 1
+                await client.disconnect()
+            except: pass
+        save_stats(stats)
+        await message.answer(f"✅ رمز دو مرحله‌ای برای تمام ({count}) اکانت حذف شد.", reply_markup=get_account_settings_keyboard())
+
+    elif action == "apply_2fa":
+        if not user_config["password_2fa"]:
+            await message.answer("❌ ابتدا رمز دو مرحله‌ای جدید را از بخش «تنظیم رمز دو مرحله‌ای» ثبت کنید.", reply_markup=get_account_settings_keyboard())
+            return
+        count = 0
+        stats = load_stats()
+        for p in sessions:
+            client = TelegramClient(f"sessions/{p}", API_ID, API_HASH)
+            try:
+                await client.connect()
+                if await client.is_user_authorized():
+                    await client.edit_2fa(new_password=user_config["password_2fa"])
+                    stats.setdefault("passwords", {})[p] = user_config["password_2fa"]
+                    count += 1
+                await client.disconnect()
+            except: pass
+        save_stats(stats)
+        await message.answer(f"✅ رمز دو مرحله‌ای جدید روی تمام ({count}) اکانت اعمال شد.", reply_markup=get_account_settings_keyboard())
+
+    elif action == "check_spambot":
+        await message.answer("🔎 در حال بررسی وضعیت حساب‌ها توسط SpamBot...", reply_markup=get_account_settings_keyboard())
+        for p in sessions:
+            client = TelegramClient(f"sessions/{p}", API_ID, API_HASH)
+            try:
+                await client.connect()
+                if not await client.is_user_authorized():
+                    await message.answer(f"📱 شماره: `+{p}`\n❌ وضعیت: سشن نامعتبر یا فریز شده")
+                    await client.disconnect()
+                    continue
+
+                await client(StartBotRequest(bot="SpamBot", peer="SpamBot", start_param="start"))
+                await asyncio.sleep(3)
+                msgs = await client.get_messages("SpamBot", limit=1)
+                text_res = msgs[0].text if msgs else ""
+
+                if "good news" in text_res.lower() or "free" in text_res.lower() or "لا توجد" in text_res:
+                    status = "🟢 سالم (بدون محدودیت)"
+                elif "permanently" in text_res.lower() or "دائم" in text_res:
+                    status = "🔴 ریپورت دائم"
+                elif "limited" in text_res.lower() or "محدود" in text_res:
+                    status = "🟡 ریپورت موقت"
+                else:
+                    status = f"ℹ️ پاسخ ربات:\n{text_res[:100]}"
+
+                await message.answer(f"📱 شماره: `+{p}`\n📊 وضعیت: {status}", parse_mode="Markdown")
+                await client.disconnect()
+            except Exception as e:
+                await message.answer(f"📱 شماره: `+{p}`\n❌ وضعیت: فریز یا غیرفعال ({e})")
+                try: await client.disconnect()
+                except: pass
+
+    elif action in ["anti_login_on", "anti_login_off"]:
+        state_txt = "فعال" if action == "anti_login_on" else "غیرفعال"
+        user_config["anti_login"] = (action == "anti_login_on")
+        await message.answer(f"✅ آنتی لاگین برای همه اکانت‌ها {state_txt} شد.", reply_markup=get_account_settings_keyboard())
+
+    await state.clear()
 
 @dp.message(F.text == "شماره 📱")
 async def logout_single_prompt(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
-    await state.set_state(BotStates.waiting_for_logout_target)
-    await message.answer("لطفاً شماره مورد نظر جهت خروج (مثلاً `989123456789+` یا چند شماره با فاصله یا خط جدید) را ارسال کنید:")
+    await state.set_state(BotStates.waiting_for_action_numbers)
+    await message.answer("لطفاً شماره(های) مورد نظر (مثلاً `989123456789+` با فاصله یا خط جدید) را ارسال کنید:")
 
-@dp.message(BotStates.waiting_for_logout_target)
-async def process_logout_target(message: types.Message, state: FSMContext):
+@dp.message(BotStates.waiting_for_action_numbers)
+async def process_action_numbers(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
+    data = await state.get_data()
+    action = data.get("current_action")
     targets = [t.strip().replace("+", "") for t in message.text.split() if t.strip()]
     await state.clear()
-    
-    success_count = 0
-    for t in targets:
-        session_path = f"sessions/{t}"
-        if os.path.exists(session_path + ".session"):
+
+    if action == "logout_accounts":
+        count = 0
+        for t in targets:
+            session_path = f"sessions/{t}"
+            if os.path.exists(session_path + ".session"):
+                try:
+                    client = TelegramClient(session_path, API_ID, API_HASH)
+                    await client.connect()
+                    if await client.is_user_authorized():
+                        await client(LogOutRequest())
+                    await client.disconnect()
+                except: pass
+                try: os.remove(session_path + ".session")
+                except: pass
+                count += 1
+        await message.answer(f"✅ خروج از {count} شماره با موفقیت انجام شد.", reply_markup=get_account_settings_keyboard())
+
+    elif action == "remove_2fa":
+        count = 0
+        stats = load_stats()
+        for t in targets:
+            session_path = f"sessions/{t}"
+            if os.path.exists(session_path + ".session"):
+                try:
+                    client = TelegramClient(session_path, API_ID, API_HASH)
+                    await client.connect()
+                    if await client.is_user_authorized():
+                        current_p = stats.get("passwords", {}).get(t, "")
+                        await client.edit_2fa(current_password=current_p, new_password=None)
+                        stats.get("passwords", {}).pop(t, None)
+                        count += 1
+                    await client.disconnect()
+                except: pass
+        save_stats(stats)
+        await message.answer(f"✅ حذف رمز دو مرحله‌ای برای {count} شماره انجام شد.", reply_markup=get_account_settings_keyboard())
+
+    elif action == "apply_2fa":
+        if not user_config["password_2fa"]:
+            await message.answer("❌ ابتدا رمز دو مرحله‌ای جدید را از بخش «تنظیم رمز دو مرحله‌ای» ثبت کنید.", reply_markup=get_account_settings_keyboard())
+            return
+        count = 0
+        stats = load_stats()
+        for t in targets:
+            session_path = f"sessions/{t}"
+            if os.path.exists(session_path + ".session"):
+                try:
+                    client = TelegramClient(session_path, API_ID, API_HASH)
+                    await client.connect()
+                    if await client.is_user_authorized():
+                        await client.edit_2fa(new_password=user_config["password_2fa"])
+                        stats.setdefault("passwords", {})[t] = user_config["password_2fa"]
+                        count += 1
+                    await client.disconnect()
+                except: pass
+        save_stats(stats)
+        await message.answer(f"✅ رمز دو مرحله‌ای جدید روی {count} شماره اعمال شد.", reply_markup=get_account_settings_keyboard())
+
+    elif action == "check_spambot":
+        await message.answer("🔎 در حال بررسی وضعیت شماره‌های درخواستی توسط SpamBot...", reply_markup=get_account_settings_keyboard())
+        for t in targets:
+            session_path = f"sessions/{t}"
+            if not os.path.exists(session_path + ".session"):
+                await message.answer(f"📱 شماره: `+{t}`\n❌ فایل سشن یافت نشد.")
+                continue
+            client = TelegramClient(session_path, API_ID, API_HASH)
             try:
-                client = TelegramClient(session_path, API_ID, API_HASH)
                 await client.connect()
-                if await client.is_user_authorized():
-                    await client(LogOutRequest())
+                if not await client.is_user_authorized():
+                    await message.answer(f"📱 شماره: `+{t}`\n❌ وضعیت: سشن نامعتبر یا فریز شده")
+                    await client.disconnect()
+                    continue
+
+                await client(StartBotRequest(bot="SpamBot", peer="SpamBot", start_param="start"))
+                await asyncio.sleep(3)
+                msgs = await client.get_messages("SpamBot", limit=1)
+                text_res = msgs[0].text if msgs else ""
+
+                if "good news" in text_res.lower() or "free" in text_res.lower() or "لا توجد" in text_res:
+                    status = "🟢 سالم (بدون محدودیت)"
+                elif "permanently" in text_res.lower() or "دائم" in text_res:
+                    status = "🔴 ریپورت دائم"
+                elif "limited" in text_res.lower() or "محدود" in text_res:
+                    status = "🟡 ریپورت موقت"
+                else:
+                    status = f"ℹ️ پاسخ ربات:\n{text_res[:100]}"
+
+                await message.answer(f"📱 شماره: `+{t}`\n📊 وضعیت: {status}", parse_mode="Markdown")
                 await client.disconnect()
-            except: pass
-            try: os.remove(session_path + ".session")
-            except: pass
-            success_count += 1
+            except Exception as e:
+                await message.answer(f"📱 شماره: `+{t}`\n❌ وضعیت: فریز یا غیرفعال ({e})")
+                try: await client.disconnect()
+                except: pass
 
-    await message.answer(f"✅ خروج از {success_count} شماره با موفقیت انجام شد.", reply_markup=get_management_keyboard())
+    elif action in ["anti_login_on", "anti_login_off"]:
+        state_txt = "فعال" if action == "anti_login_on" else "غیرفعال"
+        await message.answer(f"✅ آنتی لاگین برای {len(targets)} شماره {state_txt} شد.", reply_markup=get_account_settings_keyboard())
 
+# --- تنظیمات اکانت ---
 @dp.message(F.text == "⚙️ تنظیمات اکانت")
 async def account_settings_menu(message: types.Message):
     if not is_admin(message.from_user.id): return
+    anti_status = "روشن 🟢" if user_config["anti_login"] else "خاموش 🔴"
+    tfa_pass_text = user_config["password_2fa"] if user_config["password_2fa"] else "تنظیم نشده است"
     await message.answer(
-        "⚙️ **تنظیمات حساب**\n\n"
-        "🧹 حذف نشست‌های فعال: خاموش\n"
-        "🔐 وضعیت رمز دو مرحله‌ای: خاموش\n"
-        "📝 رمز دو مرحله‌ای ثبت‌شده: تنظیم نشده است\n"
-        "🗑️ حذف رمز دو مرحله‌ای: خاموش\n"
-        "🛡️ آنتی لاگین: خاموش",
+        f"⚙️ **تنظیمات حساب**\n\n"
+        f"🔐 وضعیت رمز دو مرحله‌ای: {user_config['use_2fa']}\n"
+        f"📝 رمز دو مرحله‌ای ثبت‌شده: `{tfa_pass_text}`\n"
+        f"🛡️ آنتی لاگین: {anti_status}",
         reply_markup=get_account_settings_keyboard(),
         parse_mode="Markdown"
     )
 
-@dp.message(F.text.in_([
-    "❌ حذف نشست‌های فعال", "🛡️ آنتی لاگین", "📝 تنظیم رمز دو مرحله‌ای",
-    "🔐 رمز دو مرحله‌ای", "🗑️ حذف رمز دو مرحله‌ای", "👁️ نمایش رمز دو مرحله‌ای",
-    "👤 تغییر نام کاربری", "🔑 تغییر رمز حساب", "❌ بستن پنل"
-]))
-async def account_settings_actions(message: types.Message):
+@dp.message(F.text == "خروج از حساب ها ❌")
+async def handle_logout_accounts_menu(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
-    txt = message.text
-    if txt == "❌ بستن پنل":
-        await message.answer("پنل بسته شد.", reply_markup=get_main_keyboard())
-    else:
-        await message.answer(f"✅ دستور «{txt}» روی تنظیمات اکانت‌ها اعمال شد.", reply_markup=get_account_settings_keyboard())
+    await state.update_data(current_action="logout_accounts")
+    await message.answer("🚪 خروج از حساب‌ها:\nلطفاً انتخاب کنید که تغییرات روی کدام اکانت‌ها اعمال شود:", reply_markup=get_target_selection_keyboard())
+
+@dp.message(F.text == "🛡️ آنتی لاگین")
+async def handle_anti_login_menu(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    await message.answer("🛡️ تنظیمات آنتی لاگین:\nلطفاً وضعیت را انتخاب کنید:", reply_markup=get_anti_login_menu_keyboard())
+
+@dp.message(F.text.in_(["فعال ✅", "غیر فعال ❌"]))
+async def handle_anti_login_choice(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    act = "anti_login_on" if message.text == "فعال ✅" else "anti_login_off"
+    await state.update_data(current_action=act)
+    await message.answer("لطفاً مشخص کنید روی کدام اکانت‌ها اعمال شود:", reply_markup=get_target_selection_keyboard())
+
+@dp.message(F.text == "📝 تنظیم رمز دو مرحله‌ای")
+async def handle_set_2fa_pass_menu(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(BotStates.setting_2fa_pass)
+    await message.answer("لطفاً رمز عبور جدید دو مرحله‌ای را ارسال کنید:")
+
+@dp.message(BotStates.setting_2fa_pass)
+async def save_new_2fa_pass(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    user_config["password_2fa"] = message.text.strip()
+    user_config["use_2fa"] = True
+    await state.clear()
+    await message.answer(f"✅ رمز جدید دو مرحله‌ای ذخیره شد:\n`{user_config['password_2fa']}`", parse_mode="Markdown", reply_markup=get_account_settings_keyboard())
+
+@dp.message(F.text == "🔐 رمز دو مرحله‌ای")
+async def handle_apply_2fa_menu(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    if not user_config["password_2fa"]:
+        await message.answer("❌ ابتدا از بخش «تنظیم رمز دو مرحله‌ای» رمز جدید را تعریف کنید.", reply_markup=get_account_settings_keyboard())
+        return
+    await state.update_data(current_action="apply_2fa")
+    await message.answer(f"🔐 اعمال رمز دو مرحله‌ای (`{user_config['password_2fa']}`):\nمشخص کنید روی کدام اکانت‌ها اعمال شود:", parse_mode="Markdown", reply_markup=get_target_selection_keyboard())
+
+@dp.message(F.text == "👁️ نمایش رمز دو مرحله‌ای")
+async def handle_show_2fa_menu(message: types.Message):
+    if not is_admin(message.from_user.id): return
+    stats = load_stats()
+    passwords = stats.get("passwords", {})
+    if not passwords:
+        await message.answer("❌ هیچ رمز دو مرحله‌ای ثبت نشده است.", reply_markup=get_account_settings_keyboard())
+        return
+    text = "👁️ **لیست رمزهای دو مرحله‌ای اکانت‌ها:**\n\n"
+    for p, pwd in passwords.items():
+        text += f"📱 شماره: `+{p}`\n🔐 رمز: `{pwd}`\n-------------------\n"
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_account_settings_keyboard())
+
+@dp.message(F.text == "🗑️ حذف رمز دو مرحله‌ای")
+async def handle_remove_2fa_menu(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.update_data(current_action="remove_2fa")
+    await message.answer("🗑️ حذف رمز دو مرحله‌ای:\nمشخص کنید روی کدام اکانت‌ها اعمال شود:", reply_markup=get_target_selection_keyboard())
+
+@dp.message(F.text == "🔎 بررسی حساب ها")
+async def handle_check_spambot_menu(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.update_data(current_action="check_spambot")
+    await message.answer("🔎 بررسی وضعیت حساب‌ها از طریق @SpamBot:\nمشخص کنید کدام اکانت‌ها بررسی شوند:", reply_markup=get_target_selection_keyboard())
 
 # --- تنظیمات عمومی ---
 @dp.message(F.text == "⚙️ تنظیمات")
@@ -613,8 +855,7 @@ async def receive_numbers(message: types.Message, state: FSMContext):
     try:
         with open("numbers.txt", "r", encoding="utf-8") as f:
             count = sum(1 for line in f if line.strip())
-    except:
-        pass
+    except: pass
 
     await state.clear()
     await message.answer(f"✅ فایل شماره‌ها با موفقیت ذخیره شد.\n🔢 تعداد شماره‌های ذخیره‌شده: **{count}** عدد", parse_mode="Markdown", reply_markup=get_settings_keyboard())
