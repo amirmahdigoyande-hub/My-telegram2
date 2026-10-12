@@ -116,7 +116,7 @@ def get_creation_keyboard():
 def get_management_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="📋 لیست اکانت‌ها"),[KeyboardButton(text="⚙️ تنظیمات اکانت")],
+            [KeyboardButton(text="📋 لیست اکانت‌ها"), KeyboardButton(text="⚙️ تنظیمات اکانت")],
             [KeyboardButton(text="🔙 بازگشت به منوی اصلی")]
         ],
         resize_keyboard=True
